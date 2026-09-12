@@ -112,6 +112,19 @@ const AP_Param::Info Sub::var_info[] = {
     // @Increment: 1
     // @User: Standard
     GSCALAR(failsafe_throttle_value, "FS_THR_VALUE",  FS_THR_VALUE_DEFAULT),
+    // @Param: PHDS_USE_EKF
+    // @DisplayName: PosHoldDist Filter Selection
+    // @Description: Chọn bộ lọc KF hoặc EKF cho Mode 22. 0:KF (Chỉ Ping), 1:EKF (DVL+Ping)
+    // @Values: 0:KF, 1:EKF
+    // @User: Standard
+    GSCALAR(phds_use_ekf, "PHDS_USE_EKF", 0),
+    // @Param: PHDS_DIST_MIN
+    // @DisplayName: PosHoldDist Min Distance
+    // @Description: Khoảng cách phanh tối thiểu (tính bằng mét). Dưới mức này tàu sẽ dừng tiến.
+    // @Units: m
+    // @Range: 0 5
+    // @User: Standard
+    GSCALAR(phds_dist_min, "PHDS_DIST_MIN", 0.5f),
     
     // @Param: FLTMODE1
     // @DisplayName: Flight Mode 1

@@ -121,29 +121,6 @@ public:
     // end pass-through functions
 };
 
-#include <AP_CustomEKF/AP_CustomEKF_Distance.h>
-
-class ModePosholdDist : public ModePoshold
-{
-public:
-    // inherit constructor
-    ModePosholdDist();
-
-    void run() override;
-
-    bool init(bool ignore_checks) override;
-
-protected:
-    const char *name() const override { return "PosHoldDistance"; }
-    const char *name4() const override { return "PHDS"; }
-    Mode::Number number() const override { return Mode::Number::POSHOLD_DIST; }
-
-    void control_horizontal() override;
-
-private:
-    AP_CustomEKF_Distance _ekf;
-    uint32_t _last_ekf_update_ms;
-};
 
 
 class ModeManual : public Mode
@@ -394,6 +371,34 @@ protected:
 protected:
 
     virtual void control_horizontal();
+};
+
+#include <AP_CustomEKF/AP_CustomEKF_Distance.h>
+#include <AP_CustomEKF/AP_CustomKF_Ping.h>
+
+class ModePosholdDist : public ModePoshold
+{
+public:
+    // inherit constructor
+    ModePosholdDist();
+
+    void run() override;
+
+    bool init(bool ignore_checks) override;
+
+protected:
+    const char *name() const override { return "PosHoldDistance"; }
+    const char *name4() const override { return "PHDS"; }
+    Mode::Number number() const override { return Mode::Number::POSHOLD_DIST; }
+
+    void control_horizontal() override;
+
+private:
+
+    AP_CustomEKF_Distance _ekf; // Bộ lọc EKF (DVL + Ping)
+    AP_CustomKF_Ping _kf;       // Bộ lọc KF (Chỉ Ping)
+    
+    uint32_t _last_ekf_update_ms;
 };
 
 

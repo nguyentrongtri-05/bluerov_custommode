@@ -116,6 +116,7 @@ public:
     friend class ModeSurftrak;
     friend class ModeGuided;
     friend class ModePoshold;
+    friend class ModePosholdDist;
     friend class ModeAuto;
     friend class ModeCircle;
     friend class ModeSurface;

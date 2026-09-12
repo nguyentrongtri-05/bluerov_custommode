@@ -250,6 +250,8 @@ public:
         k_param_pilot_speed,
         k_param_failsafe_throttle,
         k_param_failsafe_throttle_value,
+        k_param_phds_use_ekf,
+        k_param_phds_dist_min,
         k_param_vehicle = 257, // vehicle common block of parameters
         k_param__gcs = 258,
     };
@@ -293,6 +295,8 @@ public:
     AP_Int16        throttle_deadzone;
     AP_Int8         failsafe_throttle;
     AP_Int16        failsafe_throttle_value;
+    AP_Int8         phds_use_ekf;
+    AP_Float        phds_dist_min;
     AP_Int16        thr_arming_position;
     
 
