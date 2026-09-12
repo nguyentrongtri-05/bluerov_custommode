@@ -20,6 +20,16 @@
 
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/10598/badge)](https://www.bestpractices.dev/projects/10598)
 
+## Custom Branch: BlueROV EKF Distance Hold
+This repository contains a custom ArduSub flight mode for obstacle avoidance, designed for BlueROV or similar underwater vehicles:
+- **New Mode:** `PosHoldDistance` (PHDS, MAVLink Mode ID `22`).
+- **Functionality:** Inherits standard `PosHold` behaviors but adds forward obstacle avoidance using a custom Extended Kalman Filter (EKF). 
+- **Sensors:** Fuses forward-facing Ping Altimeter (distance) and downward-facing DVL (velocity) data.
+- **Safety:** Automatically decelerates when an obstacle is within 1.0 meter and completely blocks forward motion at 0.5 meters to prevent collision.
+- **Implementation:** Code is located in `ArduSub/mode_poshold_dist.cpp` and `libraries/AP_CustomEKF`.
+
+---
+
 ArduPilot is the most advanced, full-featured, and reliable open source autopilot software available.
 It has been under development since 2010 by a diverse team of professional engineers, computer scientists, and community contributors.
 Our autopilot software is capable of controlling almost any vehicle system imaginable, from conventional airplanes, quad planes, multi-rotors, and helicopters to rovers, boats, balance bots, and even submarines.
