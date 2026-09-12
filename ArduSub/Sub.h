@@ -611,6 +611,7 @@ private:
     ModeAuto mode_auto;
     ModeGuided mode_guided;
     ModePoshold mode_poshold;
+    ModePosholdDist mode_poshold_dist;
     ModeCircle mode_circle;
     ModeSurface mode_surface;
     ModeMotordetect mode_motordetect;

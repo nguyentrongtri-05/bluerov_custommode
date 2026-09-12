@@ -50,7 +50,8 @@ public:
         POSHOLD =      16,  // automatic position hold with manual override, with automatic throttle
         MANUAL =       19,  // Pass-through input with no stabilization
         MOTOR_DETECT = 20,  // Automatically detect motors orientation
-        SURFTRAK =     21   // Track distance above seafloor (hold range)
+        SURFTRAK =     21,  // Track distance above seafloor (hold range)
+        POSHOLD_DIST = 22   // Position hold with distance to object
         // Mode number 30 reserved for "offboard" for external/lua control.
     };
 
@@ -119,6 +120,31 @@ public:
 
     // end pass-through functions
 };
+
+#include <AP_CustomEKF/AP_CustomEKF_Distance.h>
+
+class ModePosholdDist : public ModePoshold
+{
+public:
+    // inherit constructor
+    ModePosholdDist();
+
+    void run() override;
+
+    bool init(bool ignore_checks) override;
+
+protected:
+    const char *name() const override { return "PosHoldDistance"; }
+    const char *name4() const override { return "PHDS"; }
+    Mode::Number number() const override { return Mode::Number::POSHOLD_DIST; }
+
+    void control_horizontal() override;
+
+private:
+    AP_CustomEKF_Distance _ekf;
+    uint32_t _last_ekf_update_ms;
+};
+
 
 class ModeManual : public Mode
 {
@@ -365,9 +391,9 @@ protected:
     const char *name4() const override { return "POSH"; }
     Mode::Number number() const override { return Mode::Number::POSHOLD; }
 
-private:
+protected:
 
-    void control_horizontal();
+    virtual void control_horizontal();
 };
 
 

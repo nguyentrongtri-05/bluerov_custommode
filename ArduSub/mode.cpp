@@ -43,6 +43,9 @@ Mode *Sub::mode_from_mode_num(const Mode::Number mode)
     case Mode::Number::POSHOLD:
         ret = &mode_poshold;
         break;
+    case Mode::Number::POSHOLD_DIST:
+        ret = &mode_poshold_dist;
+        break;
     case Mode::Number::AUTO:
         ret = &mode_auto;
         break;

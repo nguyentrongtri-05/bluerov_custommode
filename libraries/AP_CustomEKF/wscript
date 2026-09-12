@@ -1,0 +1,11 @@
+#!/usr/bin/env python
+
+def build(bld):
+    bld.ap_library(
+        name='AP_CustomEKF',
+        ap_vehicle='all',
+        ap_libraries=[
+            'AP_Math',
+            'AP_HAL'
+        ],
+    )
