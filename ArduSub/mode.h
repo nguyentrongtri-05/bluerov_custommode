@@ -389,7 +389,7 @@ public:
 protected:
     const char *name() const override { return "PosHoldDistance"; }
     const char *name4() const override { return "PHDS"; }
-    Mode::Number number() const override { return Mode::Number::POSHOLD_DIST; }
+    Mode::Number number() const override { return Mode::Number::CIRCLE; }
 
     void control_horizontal() override;
 

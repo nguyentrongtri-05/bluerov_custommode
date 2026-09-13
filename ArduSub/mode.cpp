@@ -53,7 +53,7 @@ Mode *Sub::mode_from_mode_num(const Mode::Number mode)
         ret = &mode_guided;
         break;
     case Mode::Number::CIRCLE:
-        ret = &mode_circle;
+        ret = &mode_poshold_dist;
         break;
     case Mode::Number::SURFACE:
         ret = &mode_surface;
