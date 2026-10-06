@@ -1,13 +1,48 @@
 // ArduSub position hold flight mode with distance tracking
-// Inherits from PosHold and uses EKF/KF distance to avoid obstacles
+// Inherits from PosHold and limits forward motion using the forward Ping (RNGFND1).
+// Distance source selected by PHDS_USE_EKF: 0 Raw, 1 KF (Ping only), 2 EKF (Ping + DVL velocity)
 
 #include "Sub.h"
+#include <AP_RangeFinder/AP_RangeFinder_Backend.h>
 
 #if POSHOLD_ENABLED
 
-ModePosholdDist::ModePosholdDist()
+// bộ lọc coi là mất Ping nếu không có mẫu mới trong khoảng này
+#define PHDS_PING_TIMEOUT_MS 500
+
+ModePosholdDist::ModePosholdDist() :
+    _last_filter_us(0),
+    _last_ping_reading_ms(0),
+    _last_fused_ms(0),
+    _last_send_ms(0),
+    _last_log_ms(0)
 {
-    _last_ekf_update_ms = 0;
+}
+
+bool ModePosholdDist::get_raw_distance(float &dist_m, uint32_t &reading_ms) const
+{
+    const RangeFinder *rangefinder = RangeFinder::get_singleton();
+    if (rangefinder == nullptr) {
+        return false;
+    }
+    // RNGFND1 = instance 0
+    const AP_RangeFinder_Backend *backend = rangefinder->get_backend(0);
+    if (backend == nullptr || !backend->has_data()) {
+        return false;
+    }
+    // cùng quy tắc chất lượng tín hiệu với RNGFND_SQ_MIN của ArduSub (-1 = không rõ)
+    const int8_t quality = backend->signal_quality_pct();
+    if (quality != -1 && quality < g.rangefinder_signal_min) {
+        return false;
+    }
+    dist_m = backend->distance();
+    reading_ms = backend->last_reading_ms();
+    return true;
+}
+
+bool ModePosholdDist::filters_valid(uint32_t now_ms) const
+{
+    return _last_fused_ms != 0 && (now_ms - _last_fused_ms) < PHDS_PING_TIMEOUT_MS;
 }
 
 bool ModePosholdDist::init(bool ignore_checks)
@@ -16,59 +51,60 @@ bool ModePosholdDist::init(bool ignore_checks)
         return false;
     }
 
-    // Initialize both filters
-    _ekf.init(0.0f, 0.0f);
-    _kf.init(0.0f, 0.0f);
-    _last_ekf_update_ms = AP_HAL::millis();
+    // bộ lọc sẽ được khởi tạo từ mẫu Ping mới đầu tiên trong update_filters()
+    _last_fused_ms = 0;
+    _last_ping_reading_ms = 0;
+    _last_filter_us = AP_HAL::micros();
 
     return true;
 }
 
+void ModePosholdDist::update_filters()
+{
+    const uint32_t now_us = AP_HAL::micros();
+    const float dt = (now_us - _last_filter_us) * 1.0e-6f;
+    _last_filter_us = now_us;
+
+    // gia tốc tới theo phương ngang: accel_ef chỉ chứa trọng trường ở trục z,
+    // nên lấy thành phần ngang rồi xoay theo yaw sẽ không bị lẫn trọng trường khi tàu nghiêng
+    const float accel_fwd = ahrs.earth_to_body2D(ahrs.get_accel_ef().xy()).x;
+
+    // vận tốc tới từ AHRS (EKF3 đã fuse DVL)
+    Vector3f vel_ned;
+    const bool have_vel = ahrs.get_velocity_NED(vel_ned);
+    const float vel_fwd = have_vel ? ahrs.earth_to_body2D(vel_ned.xy()).x : 0.0f;
+
+    if (dt > 0.0f && dt < 0.5f) {
+        _kf.predict(accel_fwd, dt);
+        _ekf.predict(accel_fwd, dt);
+        if (have_vel) {
+            _ekf.update_velocity(vel_fwd);
+        }
+    }
+
+    // chỉ update khi có mẫu Ping mới, tránh fuse lặp lại cùng một mẫu ở 400Hz
+    float dist_m;
+    uint32_t reading_ms;
+    if (!get_raw_distance(dist_m, reading_ms) || reading_ms == _last_ping_reading_ms) {
+        return;
+    }
+    _last_ping_reading_ms = reading_ms;
+
+    const uint32_t now_ms = AP_HAL::millis();
+    if (!filters_valid(now_ms)) {
+        // lần đầu hoặc vừa mất Ping: khởi tạo lại từ mẫu đo
+        _kf.init(dist_m, vel_fwd);
+        _ekf.init(dist_m, vel_fwd);
+    } else {
+        _kf.update_distance(dist_m);
+        _ekf.update_distance(dist_m);
+    }
+    _last_fused_ms = now_ms;
+}
+
 void ModePosholdDist::run()
 {
-    uint32_t tnow = AP_HAL::millis();
-    if (_last_ekf_update_ms == 0) {
-        _last_ekf_update_ms = tnow;
-    }
-    
-    float dt = (tnow - _last_ekf_update_ms) * 0.001f;
-    if (dt > 0.01f && dt < 1.0f) { // Only update if dt is reasonable
-        // Lấy gia tốc thân (forward accel)
-        const AP_InertialSensor &ins = AP::ins();
-        Vector3f accel_body = ins.get_accel(); 
-        
-        // Lấy dữ liệu Ping Altimeter
-        float dist_m = 0.0f;
-        bool has_ping = false;
-        RangeFinder *rangefinder = RangeFinder::get_singleton();
-        if (rangefinder && rangefinder->has_data_orient(ROTATION_NONE)) {
-            dist_m = rangefinder->distance_cm_orient(ROTATION_NONE) * 0.01f;
-            has_ping = true;
-        }
-
-        // Lựa chọn bộ lọc để cập nhật
-        if ((sub.g.phds_use_ekf.get() == 1)) {
-            // Lựa chọn 2: Dùng EKF (DVL + Ping)
-            _ekf.predict(accel_body.x, dt);
-            if (has_ping) {
-                _ekf.update_distance(dist_m);
-            }
-            
-            Vector3f vel_ned;
-            if (ahrs.get_velocity_NED(vel_ned)) {
-                Vector2f vel_body2d = ahrs.earth_to_body2D(Vector2f(vel_ned.x, vel_ned.y));
-                _ekf.update_velocity(vel_body2d.x);
-            }
-        } else {
-            // Lựa chọn 1: Dùng KF (Chỉ Ping)
-            _kf.predict(accel_body.x, dt);
-            if (has_ping) {
-                _kf.update_distance(dist_m);
-            }
-        }
-        
-        _last_ekf_update_ms = tnow;
-    }
+    update_filters();
 
     // Run original poshold mode run logic
     ModePoshold::run();
@@ -79,6 +115,26 @@ void ModePosholdDist::control_horizontal()
     float lateral_out = 0;
     float forward_out = 0;
 
+    float raw_dist_m = 0.0f;
+    uint32_t reading_ms;
+    const bool raw_ok = get_raw_distance(raw_dist_m, reading_ms);
+    const bool filt_ok = filters_valid(AP_HAL::millis());
+
+    // Chọn nguồn khoảng cách theo PHDS_USE_EKF. 0 = không hợp lệ -> chặn tiến ở bên dưới
+    const uint8_t filter_type = sub.g.phds_use_ekf.get();
+    float current_dist_m = 0.0f;
+    switch (filter_type) {
+    case 1:
+        current_dist_m = filt_ok ? _kf.get_distance() : 0.0f;
+        break;
+    case 2:
+        current_dist_m = filt_ok ? _ekf.get_distance() : 0.0f;
+        break;
+    default:
+        current_dist_m = raw_ok ? raw_dist_m : 0.0f;
+        break;
+    }
+
     // get desired rates in the body frame
     Vector2f body_rates_cms = {
         sub.get_pilot_desired_horizontal_rate(channel_forward),
@@ -86,27 +142,42 @@ void ModePosholdDist::control_horizontal()
     };
 
     // --- Tránh vật cản ---
-    // Lấy giá trị khoảng cách tùy thuộc vào lựa chọn của người dùng
-    float current_dist_m;
-    if ((sub.g.phds_use_ekf.get() == 1)) {
-        current_dist_m = _ekf.get_distance(); // 2. Lấy từ EKF
-    } else {
-        current_dist_m = _kf.get_distance();  // 1. Lấy từ KF
-    }
     
     float min_dist_m = sub.g.phds_dist_min.get();
-    float max_dist_m = min_dist_m + 0.3f; // Vùng giảm tốc bắt đầu trước 50cm so với mức min
+    float max_dist_m = min_dist_m + 0.3f; // Vùng giảm tốc bắt đầu trước 30cm so với mức min
 
-    // Giữ khoảng cách an toàn
-    if (current_dist_m <= min_dist_m && body_rates_cms.x > 0) {
-        body_rates_cms.x = 0; // Chặn hoàn toàn tốc độ tới
-    } 
-    // Giảm tốc độ dần trong khoảng 50cm trước khi chạm mức min
-    else if (current_dist_m < max_dist_m && body_rates_cms.x > 0) {
-        float allowed_ratio = (current_dist_m - min_dist_m) / 0.3f; // Từ 0.0 đến 1.0
-        float max_speed_cms = g.pilot_speed * allowed_ratio;
-        if (body_rates_cms.x > max_speed_cms) {
-            body_rates_cms.x = max_speed_cms;
+    // --- Giữ khoảng cách và Tự động lùi ---
+    // Chỉ kích hoạt tự lùi nếu cảm biến Ping trả về giá trị hợp lệ (> 10cm)
+    // Đề phòng trường hợp Ping bị tuột dây (trả về 0) làm tàu lùi điên cuồng vô tận.
+    if (current_dist_m > 0.1f) {
+        if (current_dist_m < min_dist_m) {
+            // Tàu lún vào vùng cấm -> Ép tàu bơi lùi
+            float error_m = min_dist_m - current_dist_m; // Xâm nhập bao nhiêu mét
+            float auto_reverse_speed_cms = -error_m * 100.0f; // Kp = 100 (Ví dụ: lún 0.1m -> lùi 10cm/s)
+            
+            // Giới hạn tốc độ lùi tối đa (Max là 50% tốc độ bay thông thường)
+            if (auto_reverse_speed_cms < -g.pilot_speed * 0.5f) {
+                auto_reverse_speed_cms = -g.pilot_speed * 0.5f;
+            }
+            
+            // Ghi đè tay ga: Dù phi công đẩy tới hay buông tay, tàu vẫn phải lùi
+            if (body_rates_cms.x > auto_reverse_speed_cms) {
+                body_rates_cms.x = auto_reverse_speed_cms;
+            }
+        } 
+        // Vùng đệm giảm tốc (từ min_dist đến min_dist+30cm)
+        else if (current_dist_m < max_dist_m && body_rates_cms.x > 0) {
+            float allowed_ratio = (current_dist_m - min_dist_m) / 0.3f;
+            float max_speed_cms = g.pilot_speed * allowed_ratio;
+            if (body_rates_cms.x > max_speed_cms) {
+                body_rates_cms.x = max_speed_cms;
+            }
+        }
+    } else {
+        // Tín hiệu Ping < 10cm (có thể do lỗi cáp, Ping chết hoặc quá sát vách). 
+        // Tạm thời chặn tay ga tiến (an toàn tuyệt đối), nhưng cho phép phi công lùi tay.
+        if (body_rates_cms.x > 0) {
+            body_rates_cms.x = 0;
         }
     }
     // --------------------------------------------------
@@ -132,13 +203,32 @@ void ModePosholdDist::control_horizontal()
         lateral_out = body_rates_cms.y / (float)g.pilot_speed;
     }
 
-        // --- Gửi dữ liệu khoảng cách lên QGroundControl ---
-    static uint32_t last_log_ms = 0;
-    uint32_t now = AP_HAL::millis();
-    if (now - last_log_ms > 200) { // Gửi với tần số 5Hz (200ms/lần) để tránh nghẽn mạng
-        sub.gcs().send_named_int("KF_Dist_cm", (int32_t)(current_dist_m * 100));
-        last_log_ms = now;
+    // --- Gửi cả 3 giá trị lên QGC (5Hz) để so sánh. -1 = không hợp lệ ---
+    // tên NAMED_VALUE_INT tối đa 10 ký tự
+    const uint32_t now = AP_HAL::millis();
+    if (now - _last_send_ms > 200) {
+        sub.gcs().send_named_int("PHDS_Raw", raw_ok ? (int32_t)(raw_dist_m * 100) : -1);
+        sub.gcs().send_named_int("PHDS_KF", filt_ok ? (int32_t)(_kf.get_distance() * 100) : -1);
+        sub.gcs().send_named_int("PHDS_EKF", filt_ok ? (int32_t)(_ekf.get_distance() * 100) : -1);
+        _last_send_ms = now;
     }
+
+#if HAL_LOGGING_ENABLED
+    // --- Ghi log PHDS (10Hz) để phân tích sau bằng MAVExplorer ---
+    if (now - _last_log_ms >= 100) {
+        AP::logger().Write("PHDS", "TimeUS,Sel,Raw,KF,EKF,KFv,EKFv,RawOk,FiltOk", "QBfffffBB",
+                           AP_HAL::micros64(),
+                           filter_type,
+                           raw_dist_m,
+                           _kf.get_distance(),
+                           _ekf.get_distance(),
+                           _kf.get_velocity(),
+                           _ekf.get_velocity(),
+                           (uint8_t)raw_ok,
+                           (uint8_t)filt_ok);
+        _last_log_ms = now;
+    }
+#endif
 
     motors.set_forward(forward_out);
     motors.set_lateral(lateral_out);

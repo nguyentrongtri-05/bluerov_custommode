@@ -13,15 +13,25 @@ AP_CustomEKF_Distance::AP_CustomEKF_Distance()
     _P[1][1] = 1.0f;
 
     // Các thông số nhiễu (cần được tune cho thực tế)
-    _Q_accel = 0.1f;
-    _R_ping = 0.5f;
-    _R_dvl = 0.2f;
+    _Q_accel = 0.5f;
+    _R_ping = 0.05f;
+    _R_dvl = 0.1f;
+
+    _reject_count = 0;
 }
 
 void AP_CustomEKF_Distance::init(float initial_distance, float initial_velocity)
 {
     _state[0] = initial_distance;
     _state[1] = initial_velocity;
+
+    // Reset hiệp phương sai: khoảng cách lấy từ mẫu Ping, vận tốc chưa chắc chắn
+    _P[0][0] = _R_ping;
+    _P[0][1] = 0.0f;
+    _P[1][0] = 0.0f;
+    _P[1][1] = 1.0f;
+
+    _reject_count = 0;
 }
 
 void AP_CustomEKF_Distance::predict(float accel_forward, float dt)
@@ -101,10 +111,26 @@ void AP_CustomEKF_Distance::update_matrix(const float H[2], float R, float measu
     _P[0][1] = I_KH[0][0] * P01 + I_KH[0][1] * P11;
     _P[1][0] = I_KH[1][0] * P00 + I_KH[1][1] * P10;
     _P[1][1] = I_KH[1][0] * P01 + I_KH[1][1] * P11;
+
+    // Giữ P đối xứng để tránh sai số số học tích lũy
+    const float P_offdiag = 0.5f * (_P[0][1] + _P[1][0]);
+    _P[0][1] = P_offdiag;
+    _P[1][0] = P_offdiag;
 }
 
 void AP_CustomEKF_Distance::update_distance(float measured_distance)
 {
+    // Cổng loại nhiễu: S = H*P*H^T + R với H = [1, 0]
+    const float S = _P[0][0] + _R_ping;
+    const float y = measured_distance - _state[0];
+    if (y * y > INNOV_GATE_SIGMA * INNOV_GATE_SIGMA * S) {
+        if (y < 0.0f || ++_reject_count >= INNOV_RESET_COUNT) {
+            init(measured_distance, _state[1]);
+        }
+        return;
+    }
+    _reject_count = 0;
+
     // Ping altimeter cung cấp giá trị khoảng cách (Distance)
     // Ma trận H cho khoảng cách là [1, 0]
     const float H[2] = {1.0f, 0.0f};

@@ -114,8 +114,8 @@ const AP_Param::Info Sub::var_info[] = {
     GSCALAR(failsafe_throttle_value, "FS_THR_VALUE",  FS_THR_VALUE_DEFAULT),
     // @Param: PHDS_USE_EKF
     // @DisplayName: PosHoldDist Filter Selection
-    // @Description: Chọn bộ lọc KF hoặc EKF cho Mode 22. 0:KF (Chỉ Ping), 1:EKF (DVL+Ping)
-    // @Values: 0:KF, 1:EKF
+    // @Description: Chọn bộ lọc khoảng cách Ping. 0: Raw (Gốc), 1: KF (Chỉ Ping), 2: EKF (DVL+Ping)
+    // @Values: 0:Raw, 1:KF, 2:EKF
     // @User: Standard
     GSCALAR(phds_use_ekf, "PHDS_USE_EKF", 0),
     // @Param: PHDS_DIST_MIN

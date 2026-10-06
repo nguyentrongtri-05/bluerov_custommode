@@ -35,5 +35,7 @@ private:
 
     float _Q_accel; // Nhiễu hệ thống (process noise)
     float _R_ping;  // Nhiễu đo lường của riêng cảm biến Ping
+
+    uint8_t _reject_count; // số mẫu Ping liên tiếp bị cổng loại bỏ
 };
 

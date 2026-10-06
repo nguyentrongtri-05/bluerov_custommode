@@ -14,13 +14,23 @@ AP_CustomKF_Ping::AP_CustomKF_Ping()
     _Q_accel = 0.5f; 
     
     // Nhiễu đo lường R của riêng Ping Altimeter
-    _R_ping = 0.8f; 
+    _R_ping = 0.05f; 
+
+    _reject_count = 0;
 }
 
 void AP_CustomKF_Ping::init(float initial_distance, float initial_velocity)
 {
     _state[0] = initial_distance;
     _state[1] = initial_velocity;
+
+    // Reset hiệp phương sai: khoảng cách lấy từ mẫu Ping, vận tốc chưa chắc chắn
+    _P[0][0] = _R_ping;
+    _P[0][1] = 0.0f;
+    _P[1][0] = 0.0f;
+    _P[1][1] = 1.0f;
+
+    _reject_count = 0;
 }
 
 void AP_CustomKF_Ping::predict(float accel_forward, float dt)
@@ -69,13 +79,22 @@ void AP_CustomKF_Ping::update_distance(float measured_distance)
         return; // Tránh chia cho 0
     }
     
+    // Sai số đo lường
+    float y = measured_distance - _state[0];
+
+    // Cổng loại nhiễu (xem AP_CustomEKF_Base)
+    if (y * y > INNOV_GATE_SIGMA * INNOV_GATE_SIGMA * S) {
+        if (y < 0.0f || ++_reject_count >= INNOV_RESET_COUNT) {
+            init(measured_distance, _state[1]);
+        }
+        return;
+    }
+    _reject_count = 0;
+
     // Tính Kalman Gain: K = P * H^T * S^-1
     float K[2];
     K[0] = PH0 / S;
     K[1] = PH1 / S;
-    
-    // Sai số đo lường
-    float y = measured_distance - _state[0];
     
     // Cập nhật trạng thái
     _state[0] += K[0] * y;
@@ -97,5 +116,10 @@ void AP_CustomKF_Ping::update_distance(float measured_distance)
     _P[0][1] = I_KH[0][0] * P01 + I_KH[0][1] * P11;
     _P[1][0] = I_KH[1][0] * P00 + I_KH[1][1] * P10;
     _P[1][1] = I_KH[1][0] * P01 + I_KH[1][1] * P11;
+
+    // Giữ P đối xứng để tránh sai số số học tích lũy
+    const float P_offdiag = 0.5f * (_P[0][1] + _P[1][0]);
+    _P[0][1] = P_offdiag;
+    _P[1][0] = P_offdiag;
 }
 

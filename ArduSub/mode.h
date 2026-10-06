@@ -395,10 +395,23 @@ protected:
 
 private:
 
+    // đọc Ping RNGFND1, trả về false nếu không có mẫu dùng được
+    bool get_raw_distance(float &dist_m, uint32_t &reading_ms) const;
+
+    // chạy predict mỗi vòng lặp, update khi có mẫu Ping mới
+    void update_filters();
+
+    // bộ lọc chỉ hợp lệ nếu vừa nhận mẫu Ping gần đây
+    bool filters_valid(uint32_t now_ms) const;
+
     AP_CustomEKF_Distance _ekf; // Bộ lọc EKF (DVL + Ping)
     AP_CustomKF_Ping _kf;       // Bộ lọc KF (Chỉ Ping)
-    
-    uint32_t _last_ekf_update_ms;
+
+    uint32_t _last_filter_us;       // thời điểm predict gần nhất
+    uint32_t _last_ping_reading_ms; // mốc thời gian của mẫu Ping đã đưa vào bộ lọc
+    uint32_t _last_fused_ms;        // thời điểm đưa mẫu Ping gần nhất vào bộ lọc (0 = chưa có)
+    uint32_t _last_send_ms;         // gửi NAMED_VALUE_INT lên GCS
+    uint32_t _last_log_ms;          // ghi log PHDS
 };
 
 

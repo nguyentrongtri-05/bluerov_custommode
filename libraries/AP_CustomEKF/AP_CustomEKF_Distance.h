@@ -44,6 +44,8 @@ private:
     float _R_ping; // Nhiễu Ping altimeter
     float _R_dvl;  // Nhiễu DVL
 
+    uint8_t _reject_count; // số mẫu Ping liên tiếp bị cổng loại bỏ
+
     // Hàm cập nhật ma trận KF chung
     void update_matrix(const float H[2], float R, float measurement, float predicted_measurement);
 };
