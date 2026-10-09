@@ -252,6 +252,10 @@ public:
         k_param_failsafe_throttle_value,
         k_param_phds_use_ekf,
         k_param_phds_dist_min,
+        k_param_phds_action,
+        k_param_phds_stall_vel,
+        k_param_phds_stall_t,
+        k_param_phds_push,
         k_param_vehicle = 257, // vehicle common block of parameters
         k_param__gcs = 258,
     };
@@ -297,6 +301,10 @@ public:
     AP_Int16        failsafe_throttle_value;
     AP_Int8         phds_use_ekf;
     AP_Float        phds_dist_min;
+    AP_Int8         phds_action;
+    AP_Float        phds_stall_vel;
+    AP_Float        phds_stall_t;
+    AP_Float        phds_push;
     AP_Int16        thr_arming_position;
     
 

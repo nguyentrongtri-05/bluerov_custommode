@@ -20,17 +20,82 @@
 
 [![OpenSSF Best Practices](https://www.bestpractices.dev/projects/10598/badge)](https://www.bestpractices.dev/projects/10598)
 
-## Custom Branch: BlueROV EKF Distance Hold
-This repository contains a custom ArduSub flight mode for obstacle avoidance, designed for BlueROV or similar underwater vehicles:
-- **New Mode:** `PosHoldDistance` (PHDS, MAVLink Mode ID `22` or `19` if overridden).
-- **Functionality:** Inherits standard `PosHold` behaviors but adds forward obstacle avoidance using a custom 1D Kalman Filter (KF) or Extended Kalman Filter (EKF). 
-- **Sensors:** Fuses forward-facing Ping Altimeter (distance) and downward-facing DVL (velocity) data.
-- **Dynamic Parameters:**
-  - `PHDS_USE_EKF`: Toggle between KF (0: Ping only) and EKF (1: DVL + Ping).
-  - `PHDS_DIST_MIN`: Minimum allowed distance to obstacle in meters (default: 0.5m). 
-- **Safety Logic:** Automatically decelerates when an obstacle is within `PHDS_DIST_MIN + 0.5m` and completely blocks forward motion at `PHDS_DIST_MIN` to prevent collision.
-- **Real-time Telemetry:** Sends `KF_Dist_cm` variable via `NAMED_VALUE_INT` MAVLink message at 5Hz to plot real-time filtered distance in QGroundControl.
-- **Implementation:** Code is located in `ArduSub/mode_poshold_dist.cpp` and `libraries/AP_CustomEKF`.
+## Custom Branch: BlueROV PosHold Distance / Contact
+
+This repository contains a custom ArduSub flight mode for BlueROV-type vehicles working close to structures (e.g. bridge piers).
+
+### Mode
+
+- **Name:** `PosHoldDistance` (short name `PHDS`), implemented as `ModePosholdDist` (inherits `ModePoshold`).
+- **Mode number:** reported as `7` (`CIRCLE`) so that QGroundControl can select it from its existing mode list (shown as "Circle"). `Mode::Number::POSHOLD_DIST` (`22`) also maps to it. The joystick button function `mode_circle` enters this mode. The stock `ModeCircle` is no longer reachable.
+- **Requires** a position estimate (DVL through EKF3), same as `PosHold`. Depth and heading hold are unchanged from `PosHold`.
+
+### Sensors
+
+- **Forward Ping** on rangefinder instance 1: `RNGFND1_TYPE=10` (MAVLink), `RNGFND1_ORIENT=0` (forward). Samples with signal quality below `RNGFND_SQ_MIN` are ignored (`-1` = unknown is accepted).
+- **DVL** velocity, used through the AHRS/EKF3 velocity estimate.
+
+### Behaviour (`PHDS_ACTION`)
+
+- **0 - Keep distance** (uses the Ping distance selected by `PHDS_USE_EKF`):
+  - Between `PHDS_DIST_MIN` and `PHDS_DIST_MIN + 0.3 m`, forward speed is limited linearly to `PILOT_SPEED * (d - PHDS_DIST_MIN) / 0.3`.
+  - Below `PHDS_DIST_MIN`, the vehicle reverses automatically at `100 cm/s per metre` of intrusion (max 50% of `PILOT_SPEED`), even if the pilot pushes forward.
+  - If the distance is invalid (no Ping for 500 ms, or `<= 0.1 m`), forward motion is blocked; reverse and lateral are still allowed.
+- **1 - Contact** (does not use Ping):
+  - Normal `PosHold` while approaching.
+  - If the pilot pushes forward, the position controller is pushing forward and the forward velocity stays below `PHDS_STALL_VEL` for `PHDS_STALL_T` seconds, contact is declared.
+  - In contact, the position controller is stopped (its accumulated thrust is discarded) and a fixed forward thrust `PHDS_PUSH` is applied. Lateral is manual (no position hold on that axis while in contact).
+  - Pulling the stick back (or setting `PHDS_ACTION=0`, or changing mode) releases contact; `PosHold` restarts from the current position.
+
+### Distance filters (`PHDS_USE_EKF`)
+
+| Value | Source | Notes |
+|---|---|---|
+| 0 | Raw | Ping distance as received |
+| 1 | KF | Ping only, states distance/velocity, predicted with horizontal acceleration from AHRS |
+| 2 | EKF | Same as KF plus forward velocity from AHRS (DVL). Linear Kalman filter despite the name |
+
+All three are computed continuously; only the selected one is used for control. Filters are updated only when a new Ping sample arrives, re-initialised after 500 ms without Ping, and use a 5-sigma innovation gate: a sample much closer than predicted resets the filter immediately, a sample much farther is rejected (reset after 5 consecutive rejections). Noise constants are hard-coded in `libraries/AP_CustomEKF` and should be tuned from real Ping/DVL logs.
+
+### Parameters
+
+| Parameter | Default | Description |
+|---|---|---|
+| `PHDS_ACTION` | 0 | 0: keep distance, 1: contact |
+| `PHDS_USE_EKF` | 0 | Distance source: 0 Raw, 1 KF, 2 EKF |
+| `PHDS_DIST_MIN` | 0.5 m | Keep-distance threshold |
+| `PHDS_STALL_VEL` | 0.05 m/s | Contact: forward speed below this while pushing counts as blocked |
+| `PHDS_STALL_T` | 1.0 s | Contact: blocked time before contact is declared |
+| `PHDS_PUSH` | 0.08 | Contact: fixed forward thrust while in contact (0..0.3) |
+
+### Telemetry and logging
+
+- `NAMED_VALUE_INT` at 5 Hz: `PHDS_Raw`, `PHDS_KF`, `PHDS_EKF` (cm, `-1` = invalid).
+- GCS text messages: `PHDS: contact, push N%` and `PHDS: contact released`.
+- DataFlash message `PHDS` at 10 Hz: `Sel, Raw, KF, EKF, KFv, EKFv, RawOk, FiltOk, Cont`.
+
+### SITL testing
+
+```bash
+./waf configure --board sitl && ./waf sub
+./Tools/autotest/sim_vehicle.py -v ArduSub --console --map
+# in MAVProxy: param set RNGFND1_TYPE 10 ; param set RNGFND1_ORIENT 0 ; reboot
+python3 fake_wall_ping.py --wall 5 --noise 0.1   # virtual wall in front of the vehicle
+```
+
+`fake_wall_ping.py` sends `DISTANCE_SENSOR` computed from the vehicle position and heading to a virtual wall. Enter the mode before driving towards the wall (SITL has no physical obstacle; behind the wall the script reports the minimum range). Contact mode can be exercised with a strong water current against the heading (`SIM_WIND_SPD`, `SIM_WIND_DIR`).
+
+### Status and known limitations
+
+- Keep-distance mode and the three filters were tested in SITL. With `PHDS_DIST_MIN=0.5` and about 0.75 m/s approach speed, the vehicle stopped at 0.12-0.2 m (overshoot of 0.3-0.4 m) because the 0.3 m slow-down zone is shorter than the stopping distance.
+- Contact mode compiles but has not yet been tested in SITL or in water. A strong current against the heading can trigger contact without a surface.
+
+### Implementation
+
+- `ArduSub/mode_poshold_dist.cpp`, `ArduSub/mode.h`, `ArduSub/mode.cpp`
+- `ArduSub/Parameters.cpp`, `ArduSub/Parameters.h`
+- `libraries/AP_CustomEKF` (KF and EKF)
+- `fake_wall_ping.py` (SITL virtual wall)
 
 ---
 

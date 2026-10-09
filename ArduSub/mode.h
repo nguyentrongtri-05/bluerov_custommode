@@ -412,6 +412,10 @@ private:
     uint32_t _last_fused_ms;        // thời điểm đưa mẫu Ping gần nhất vào bộ lọc (0 = chưa có)
     uint32_t _last_send_ms;         // gửi NAMED_VALUE_INT lên GCS
     uint32_t _last_log_ms;          // ghi log PHDS
+
+    // chế độ áp sát (PHDS_ACTION=1)
+    uint32_t _stall_start_ms;       // bắt đầu bị chặn (0 = không bị chặn)
+    bool _contact;                  // đang tì vào bề mặt
 };
 
 

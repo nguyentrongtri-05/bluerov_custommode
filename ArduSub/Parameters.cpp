@@ -125,6 +125,35 @@ const AP_Param::Info Sub::var_info[] = {
     // @Range: 0 5
     // @User: Standard
     GSCALAR(phds_dist_min, "PHDS_DIST_MIN", 0.5f),
+    // @Param: PHDS_ACTION
+    // @DisplayName: PosHoldDist Action
+    // @Description: Hành vi của mode. 0: Giữ khoảng cách bằng Ping (PHDS_DIST_MIN, tự lùi). 1: Áp sát - khi đẩy tới mà bị bề mặt chặn lại (vận tốc DVL gần 0) thì ngừng tăng lực và chỉ đẩy nhẹ PHDS_PUSH, kéo cần lùi để thoát.
+    // @Values: 0:Giu khoang cach,1:Ap sat
+    // @User: Standard
+    GSCALAR(phds_action, "PHDS_ACTION", 0),
+    // @Param: PHDS_STALL_VEL
+    // @DisplayName: PosHoldDist stall velocity
+    // @Description: Chế độ áp sát: vận tốc tới (từ DVL/EKF) nhỏ hơn mức này trong khi đang đẩy tới thì coi là bị chặn.
+    // @Units: m/s
+    // @Range: 0.01 0.3
+    // @Increment: 0.01
+    // @User: Standard
+    GSCALAR(phds_stall_vel, "PHDS_STALL_VEL", 0.05f),
+    // @Param: PHDS_STALL_T
+    // @DisplayName: PosHoldDist stall time
+    // @Description: Chế độ áp sát: thời gian bị chặn liên tục trước khi xác nhận đã chạm bề mặt.
+    // @Units: s
+    // @Range: 0.2 5
+    // @Increment: 0.1
+    // @User: Standard
+    GSCALAR(phds_stall_t, "PHDS_STALL_T", 1.0f),
+    // @Param: PHDS_PUSH
+    // @DisplayName: PosHoldDist contact push
+    // @Description: Chế độ áp sát: lực đẩy tới cố định khi đang tì vào bề mặt (0 = thả lỏng, 1 = tối đa).
+    // @Range: 0 0.3
+    // @Increment: 0.01
+    // @User: Standard
+    GSCALAR(phds_push, "PHDS_PUSH", 0.08f),
     
     // @Param: FLTMODE1
     // @DisplayName: Flight Mode 1

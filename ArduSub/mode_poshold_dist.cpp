@@ -15,7 +15,9 @@ ModePosholdDist::ModePosholdDist() :
     _last_ping_reading_ms(0),
     _last_fused_ms(0),
     _last_send_ms(0),
-    _last_log_ms(0)
+    _last_log_ms(0),
+    _stall_start_ms(0),
+    _contact(false)
 {
 }
 
@@ -55,6 +57,9 @@ bool ModePosholdDist::init(bool ignore_checks)
     _last_fused_ms = 0;
     _last_ping_reading_ms = 0;
     _last_filter_us = AP_HAL::micros();
+
+    _contact = false;
+    _stall_start_ms = 0;
 
     return true;
 }
@@ -149,7 +154,10 @@ void ModePosholdDist::control_horizontal()
     // --- Giữ khoảng cách và Tự động lùi ---
     // Chỉ kích hoạt tự lùi nếu cảm biến Ping trả về giá trị hợp lệ (> 10cm)
     // Đề phòng trường hợp Ping bị tuột dây (trả về 0) làm tàu lùi điên cuồng vô tận.
-    if (current_dist_m > 0.1f) {
+    const bool contact_mode = (sub.g.phds_action.get() == 1);
+    if (contact_mode) {
+        // Chế độ áp sát (PHDS_ACTION=1): không giới hạn theo Ping, xử lý ở phần "Áp sát" bên dưới
+    } else if (current_dist_m > 0.1f) {
         if (current_dist_m < min_dist_m) {
             // Tàu lún vào vùng cấm -> Ép tàu bơi lùi
             float error_m = min_dist_m - current_dist_m; // Xâm nhập bao nhiêu mét
@@ -182,7 +190,20 @@ void ModePosholdDist::control_horizontal()
     }
     // --------------------------------------------------
 
-    if (sub.position_ok()) {
+    // --- Áp sát: thoát khi phi công kéo cần lùi (hoặc tắt PHDS_ACTION) ---
+    if (_contact && (!contact_mode || body_rates_cms.x < 0.0f)) {
+        _contact = false;
+        _stall_start_ms = 0;
+        GCS_SEND_TEXT(MAV_SEVERITY_INFO, "PHDS: contact released");
+    }
+
+    if (_contact) {
+        // Đang tì vào bề mặt: KHÔNG gọi position controller để nó chuyển sang inactive,
+        // bỏ lực tích lũy (khâu I). Khi thoát, nhánh bên dưới sẽ khởi tạo lại từ đầu.
+        // Chỉ đẩy tới một lực nhỏ cố định, trục ngang điều khiển tay.
+        forward_out = constrain_float(sub.g.phds_push.get(), 0.0f, 0.3f);
+        lateral_out = (g.pilot_speed > 0) ? body_rates_cms.y / (float)g.pilot_speed : 0.0f;
+    } else if (sub.position_ok()) {
         if (!position_control->NE_is_active()) {
             // the xy controller timed out, re-initialize
             position_control->NE_init_controller_stopping_point();
@@ -203,6 +224,30 @@ void ModePosholdDist::control_horizontal()
         lateral_out = body_rates_cms.y / (float)g.pilot_speed;
     }
 
+    // --- Áp sát: phát hiện bị bề mặt chặn lại ---
+    // Phi công đẩy tới rõ ràng + bộ điều khiển đang ra lực tới + vận tốc tới (DVL qua EKF3) gần 0
+    // liên tục trong PHDS_STALL_T giây -> xác nhận đã chạm
+    if (contact_mode && !_contact) {
+        const float stall_vel = sub.g.phds_stall_vel.get();
+        const bool pushing = (body_rates_cms.x * 0.01f > 2.0f * stall_vel) && (forward_out > 0.0f);
+        Vector3f vel_ned;
+        if (sub.position_ok() && pushing && ahrs.get_velocity_NED(vel_ned) &&
+            ahrs.earth_to_body2D(vel_ned.xy()).x < stall_vel) {
+            const uint32_t stall_now_ms = AP_HAL::millis();
+            if (_stall_start_ms == 0) {
+                _stall_start_ms = stall_now_ms;
+            } else if (stall_now_ms - _stall_start_ms >= (uint32_t)(sub.g.phds_stall_t.get() * 1000.0f)) {
+                _contact = true;
+                GCS_SEND_TEXT(MAV_SEVERITY_INFO, "PHDS: contact, push %.0f%%",
+                              (double)(constrain_float(sub.g.phds_push.get(), 0.0f, 0.3f) * 100.0f));
+            }
+        } else {
+            _stall_start_ms = 0;
+        }
+    } else if (!contact_mode) {
+        _stall_start_ms = 0;
+    }
+
     // --- Gửi cả 3 giá trị lên QGC (5Hz) để so sánh. -1 = không hợp lệ ---
     // tên NAMED_VALUE_INT tối đa 10 ký tự
     const uint32_t now = AP_HAL::millis();
@@ -216,7 +261,7 @@ void ModePosholdDist::control_horizontal()
 #if HAL_LOGGING_ENABLED
     // --- Ghi log PHDS (10Hz) để phân tích sau bằng MAVExplorer ---
     if (now - _last_log_ms >= 100) {
-        AP::logger().Write("PHDS", "TimeUS,Sel,Raw,KF,EKF,KFv,EKFv,RawOk,FiltOk", "QBfffffBB",
+        AP::logger().Write("PHDS", "TimeUS,Sel,Raw,KF,EKF,KFv,EKFv,RawOk,FiltOk,Cont", "QBfffffBBB",
                            AP_HAL::micros64(),
                            filter_type,
                            raw_dist_m,
@@ -225,7 +270,8 @@ void ModePosholdDist::control_horizontal()
                            _kf.get_velocity(),
                            _ekf.get_velocity(),
                            (uint8_t)raw_ok,
-                           (uint8_t)filt_ok);
+                           (uint8_t)filt_ok,
+                           (uint8_t)_contact);
         _last_log_ms = now;
     }
 #endif
