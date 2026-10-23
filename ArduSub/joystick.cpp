@@ -614,7 +614,25 @@ void Sub::handle_jsbutton_press(uint8_t _button, bool shift, bool held)
         break;
 
     case JSButton::button_function_t::k_custom_1:
-        // Not implemented
+        if (!held) {
+            pier_limit_enabled = !pier_limit_enabled;
+            if (pier_limit_enabled) {
+                if (pos_control.NE_is_active()) {
+                    pos_control.NE_stop_pos_stabilisation();
+                    pos_control.set_vel_desired_NE_ms({0.0f, 0.0f});
+                    pos_control.set_accel_desired_NE_mss({0.0f, 0.0f});
+                }
+                if (pos_control.D_is_active()) {
+                    pos_control.set_pos_desired_U_cm(pos_control.get_pos_estimate_U_m() * 100.0f);
+                    pos_control.set_vel_desired_D_ms(0.0f);
+                }
+                gcs().send_text(MAV_SEVERITY_INFO, "#Pier Mode ON: Fwd %.0f%% Lat %.0f%%",
+                                (double)(g.phds_fwd_max.get() * 100.0f),
+                                (double)(g.phds_lat_max.get() * 100.0f));
+            } else {
+                gcs().send_text(MAV_SEVERITY_INFO, "#Pier Mode OFF: Normal 100%%");
+            }
+        }
         break;
     case JSButton::button_function_t::k_custom_2:
         // Not implemented

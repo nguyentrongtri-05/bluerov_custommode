@@ -111,6 +111,11 @@ void ModePosholdDist::run()
 {
     update_filters();
 
+    if (!motors.armed()) {
+        _contact = false;
+        _stall_start_ms = 0;
+    }
+
     // Run original poshold mode run logic
     ModePoshold::run();
 }
@@ -145,6 +150,9 @@ void ModePosholdDist::control_horizontal()
         sub.get_pilot_desired_horizontal_rate(channel_forward),
         sub.get_pilot_desired_horizontal_rate(channel_lateral)
     };
+    if (sub.pier_limit_enabled) {
+        body_rates_cms *= constrain_float(g.phds_spd_scl.get(), 0.1f, 1.0f);
+    }
 
     // --- Tránh vật cản ---
     
@@ -194,14 +202,16 @@ void ModePosholdDist::control_horizontal()
     if (_contact && (!contact_mode || body_rates_cms.x < 0.0f)) {
         _contact = false;
         _stall_start_ms = 0;
+        position_control->NE_init_controller_stopping_point();
         GCS_SEND_TEXT(MAV_SEVERITY_INFO, "PHDS: contact released");
     }
 
     if (_contact) {
+        _pilot_moving_xy = false;
         // Đang tì vào bề mặt: KHÔNG gọi position controller để nó chuyển sang inactive,
         // bỏ lực tích lũy (khâu I). Khi thoát, nhánh bên dưới sẽ khởi tạo lại từ đầu.
         // Chỉ đẩy tới một lực nhỏ cố định, trục ngang điều khiển tay.
-        forward_out = constrain_float(sub.g.phds_push.get(), 0.0f, 0.3f);
+        forward_out = constrain_float(sub.g.phds_push.get(), 0.0f, Sub::PIER_THRUST_LIMIT);
         lateral_out = (g.pilot_speed > 0) ? body_rates_cms.y / (float)g.pilot_speed : 0.0f;
     } else if (sub.position_ok()) {
         if (!position_control->NE_is_active()) {
@@ -213,16 +223,34 @@ void ModePosholdDist::control_horizontal()
         auto earth_rates_cms = ahrs.body_to_earth2D(body_rates_cms);
         position_control->input_vel_accel_NE_cm(earth_rates_cms, {0, 0});
 
+        const bool pilot_moving = !body_rates_cms.is_zero();
+        if (pilot_moving) {
+            // Khi đang đẩy cần (hoặc tự lùi): giữ điểm đặt vị trí trùng với vị trí thực tế
+            // để điểm đặt không bao giờ chạy xuyên vào bên trong trụ cầu
+            position_control->NE_stop_pos_stabilisation();
+        } else if (_pilot_moving_xy) {
+            // Ngay khoảnh khắc vừa nhả cần về 0: chốt điểm giữ vị trí tại chỗ và xóa vận tốc đặt
+            // giúp ROV dừng đẩy tức thì và giữ nguyên vị trí hiện tại chống dòng nước
+            position_control->NE_stop_pos_stabilisation();
+            position_control->set_vel_desired_NE_ms({0.0f, 0.0f});
+            position_control->set_accel_desired_NE_mss({0.0f, 0.0f});
+        }
+        _pilot_moving_xy = pilot_moving;
+
         // convert pos control roll and pitch angles back to lateral and forward efforts
         sub.translate_pos_control_rp(lateral_out, forward_out);
 
         // update the xy controller
         position_control->NE_update_controller();
     } else if (g.pilot_speed > 0) {
+        _pilot_moving_xy = false;
         // allow the pilot to reposition manually
         forward_out = body_rates_cms.x / (float)g.pilot_speed;
         lateral_out = body_rates_cms.y / (float)g.pilot_speed;
     }
+
+    // --- Giới hạn bất đối xứng khi bật Pier Mode (k_custom_1) & Khởi động mềm / Dừng mềm ---
+    apply_pier_limits_and_slew(forward_out, lateral_out, sub.position_ok() && !_contact);
 
     // --- Áp sát: phát hiện bị bề mặt chặn lại ---
     // Phi công đẩy tới rõ ràng + bộ điều khiển đang ra lực tới + vận tốc tới (DVL qua EKF3) gần 0
@@ -233,13 +261,15 @@ void ModePosholdDist::control_horizontal()
         Vector3f vel_ned;
         if (sub.position_ok() && pushing && ahrs.get_velocity_NED(vel_ned) &&
             ahrs.earth_to_body2D(vel_ned.xy()).x < stall_vel) {
+            // Đang bị bề mặt trụ chặn lại: chống bão hòa tích phân (anti-windup) ngay trong lúc chờ xác nhận chạm
+            position_control->NE_set_externally_limited();
             const uint32_t stall_now_ms = AP_HAL::millis();
             if (_stall_start_ms == 0) {
                 _stall_start_ms = stall_now_ms;
             } else if (stall_now_ms - _stall_start_ms >= (uint32_t)(sub.g.phds_stall_t.get() * 1000.0f)) {
                 _contact = true;
                 GCS_SEND_TEXT(MAV_SEVERITY_INFO, "PHDS: contact, push %.0f%%",
-                              (double)(constrain_float(sub.g.phds_push.get(), 0.0f, 0.3f) * 100.0f));
+                              (double)(constrain_float(sub.g.phds_push.get(), 0.0f, Sub::PIER_THRUST_LIMIT) * 100.0f));
             }
         } else {
             _stall_start_ms = 0;

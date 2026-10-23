@@ -887,7 +887,7 @@ uint8_t GCS_MAVLINK_Sub::send_available_mode(uint8_t index) const
         &sub.mode_poshold,
         &sub.mode_auto,
         &sub.mode_guided,
-        &sub.mode_circle,
+        &sub.mode_poshold_dist,
         &sub.mode_surface,
         &sub.mode_motordetect,
     };

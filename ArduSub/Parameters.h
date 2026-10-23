@@ -256,6 +256,10 @@ public:
         k_param_phds_stall_vel,
         k_param_phds_stall_t,
         k_param_phds_push,
+        k_param_phds_fwd_max,
+        k_param_phds_lat_max,
+        k_param_phds_spd_scl,
+        k_param_phds_slew_rate,
         k_param_vehicle = 257, // vehicle common block of parameters
         k_param__gcs = 258,
     };
@@ -305,6 +309,10 @@ public:
     AP_Float        phds_stall_vel;
     AP_Float        phds_stall_t;
     AP_Float        phds_push;
+    AP_Float        phds_fwd_max;
+    AP_Float        phds_lat_max;
+    AP_Float        phds_spd_scl;
+    AP_Float        phds_slew_rate;
     AP_Int16        thr_arming_position;
     
 

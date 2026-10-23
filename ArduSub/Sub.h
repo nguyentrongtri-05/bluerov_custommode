@@ -295,6 +295,10 @@ private:
     // Flag indicating if we are currently controlling Pitch and Roll instead of forward/lateral
     bool roll_pitch_flag = false;
 
+    // Cờ giới hạn công suất ngang 30% khi áp sát trụ cầu (bật/tắt bằng nút k_custom_1)
+    bool pier_limit_enabled = false;
+    static constexpr float PIER_THRUST_LIMIT = 0.30f;
+
     // 3D Location vectors
     // Current location of the Sub (altitude is relative to home)
     Location current_loc;
@@ -613,7 +617,6 @@ private:
     ModeGuided mode_guided;
     ModePoshold mode_poshold;
     ModePosholdDist mode_poshold_dist;
-    ModeCircle mode_circle;
     ModeSurface mode_surface;
     ModeMotordetect mode_motordetect;
     ModeSurftrak mode_surftrak;

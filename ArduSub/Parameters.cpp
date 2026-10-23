@@ -154,6 +154,35 @@ const AP_Param::Info Sub::var_info[] = {
     // @Increment: 0.01
     // @User: Standard
     GSCALAR(phds_push, "PHDS_PUSH", 0.08f),
+    // @Param: PHDS_FWD_MAX
+    // @DisplayName: Pier Mode Max Forward Thrust
+    // @Description: Trần lực đẩy chiều tiến vào trụ cầu (forward > 0) khi bật nút Custom 1 (Pier Limit).
+    // @Range: 0.1 1.0
+    // @Increment: 0.05
+    // @User: Standard
+    GSCALAR(phds_fwd_max, "PHDS_FWD_MAX", 0.30f),
+    // @Param: PHDS_LAT_MAX
+    // @DisplayName: Pier Mode Max Lateral/Reverse Thrust
+    // @Description: Trần lực đẩy chiều ngang trái/phải (chống dòng chảy) và chiều lùi khi bật nút Custom 1 (Pier Limit).
+    // @Range: 0.2 1.0
+    // @Increment: 0.05
+    // @User: Standard
+    GSCALAR(phds_lat_max, "PHDS_LAT_MAX", 0.85f),
+    // @Param: PHDS_SPD_SCL
+    // @DisplayName: Pier Mode Stick Speed Scale
+    // @Description: Hệ số giảm tốc độ di chuyển tay cần (ngang và độ sâu) khi bật nút Custom 1 để rà camera mượt quanh trụ.
+    // @Range: 0.1 1.0
+    // @Increment: 0.05
+    // @User: Standard
+    GSCALAR(phds_spd_scl, "PHDS_SPD_SCL", 0.50f),
+    // @Param: PHDS_SLEW_RATE
+    // @DisplayName: Horizontal Thrust Slew Rate
+    // @Description: Tốc độ biến thiên lực đẩy ngang tối đa mỗi giây (Khởi động mềm / Dừng mềm bảo vệ động cơ, 0 = tắt).
+    // @Units: 1/s
+    // @Range: 0.0 10.0
+    // @Increment: 0.5
+    // @User: Standard
+    GSCALAR(phds_slew_rate, "PHDS_SLEW_RATE", 2.0f),
     
     // @Param: FLTMODE1
     // @DisplayName: Flight Mode 1

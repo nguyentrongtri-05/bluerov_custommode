@@ -210,6 +210,7 @@ protected:
 
     void run_pre();
     void run_post();
+    bool _pilot_moving_z = false;
 
     const char *name() const override { return "Depth Hold"; }
     const char *name4() const override { return "ALTH"; }
@@ -371,6 +372,10 @@ protected:
 protected:
 
     virtual void control_horizontal();
+    void apply_pier_limits_and_slew(float &forward_out, float &lateral_out, bool pos_ctrl_active);
+    bool _pilot_moving_xy = false;
+    float _last_fwd_out = 0.0f;
+    float _last_lat_out = 0.0f;
 };
 
 #include <AP_CustomEKF/AP_CustomEKF_Distance.h>

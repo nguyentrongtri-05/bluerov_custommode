@@ -41,3 +41,57 @@ define BOARD_CHECK_F427_USE_1M "ERROR: 1M flash use Pixhawk1-1M"
 # enable support for dshot on iomcu
 ROMFS io_firmware_dshot.bin Tools/IO_Firmware/iofirmware_dshot_lowpolh.bin
 define HAL_WITH_IO_MCU_DSHOT 1
+
+# --- FULL BLUEROV2 & LOGGING CONFIGURATION FOR PIXHAWK 1 (STM32F427) ---
+
+# 0. Disable only non-ROV airborne/CAN bloat to keep >165KB RAM free for EKF3 & SD Logging
+undef CAN1 CAN2
+define AP_SCRIPTING_ENABLED 0
+define AP_OPENDRONEID_ENABLED 0
+define HAL_ADSB_ENABLED 0
+define AP_AIS_ENABLED 0
+define OSD_ENABLED 0
+define OSD_PARAM_ENABLED 0
+define HAL_MSP_ENABLED 0
+define HAL_GYROFFT_ENABLED 0
+
+# 1. Depth / Pressure Barometers (Internal MS5611 + External I2C Bar30 MS5837 & Bar100 KellerLD)
+define AP_BARO_PROBE_EXTERNAL_I2C_BUSES 1
+define AP_BARO_MS5611_ENABLED 1
+define AP_BARO_MS5837_ENABLED 1
+define AP_BARO_KELLERLD_ENABLED 1
+
+# 2. RangeFinders / Ping Sonar (Forward Ping RNGFND1 for PosHoldDist + Downward Ping for SurfTrak)
+define AP_RANGEFINDER_ENABLED 1
+define AP_RANGEFINDER_MAVLINK_ENABLED 1
+define AP_RANGEFINDER_BLPING_ENABLED 1
+define AP_RANGEFINDER_NMEA_ENABLED 1
+define AP_RANGEFINDER_ANALOG_ENABLED 1
+
+# 3. DVL / Visual Odometry & External Navigation for EKF3 and ModePosholdDist
+define HAL_VISUALODOM_ENABLED 1
+define EK3_FEATURE_EXTERNAL_NAV 1
+define EK3_FEATURE_BODY_ODOM 1
+
+# 4. Underwater GPS (WaterLinked / MAVLink / NMEA)
+define AP_GPS_MAV_ENABLED 1
+define AP_GPS_NMEA_ENABLED 1
+
+# 5. Camera Tilt Gimbal, Lights, Newton Gripper, Relays & Telemetry
+define HAL_MOUNT_ENABLED 1
+define HAL_MOUNT_SERVO_ENABLED 1
+define AP_CAMERA_ENABLED 1
+define AP_SERVORELAYEVENTS_ENABLED 1
+define AP_RELAY_ENABLED 1
+define AP_GRIPPER_ENABLED 1
+define AP_MAVLINK_MSG_RELAY_STATUS_ENABLED 1
+define AP_MAVLINK_MSG_VIDEO_STREAM_INFORMATION_ENABLED 1
+
+# 6. Full DataFlash Logging, RTC, IMU BatchSampler, Notch Filter & Diagnostics
+define HAL_LOGGING_ENABLED 1
+define AP_RTC_LOGGING_ENABLED 1
+define AP_INERTIALSENSOR_BATCHSAMPLER_ENABLED 1
+define AP_FILTER_ENABLED 1
+define AP_INERTIALSENSOR_HARMONICNOTCH_ENABLED 1
+define AP_SCHEDULER_EXTENDED_TASKINFO_ENABLED 1
+define AP_RC_CHANNEL_AUX_FUNCTION_STRINGS_ENABLED 1
