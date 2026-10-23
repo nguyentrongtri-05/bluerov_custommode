@@ -13,8 +13,22 @@ undef STORAGE_FLASH_PAGE
 # produce this error if we are on a 2M board and using 1M firmware
 define BOARD_CHECK_F427_USE_2M "2M flash - use Pixhawk1 firmware"
 
-# disable support for dshot on iomcu
+# disable support for dshot on iomcu to fit 1M flash
 undef ROMFS
 ROMFS io_firmware.bin Tools/IO_Firmware/iofirmware_lowpolh.bin
 undef HAL_WITH_IO_MCU_DSHOT
 
+# Re-enable BlueROV2 & Logging features after minimize_features.inc
+undef AP_BARO_PROBE_EXTERNAL_I2C_BUSES
+define AP_BARO_PROBE_EXTERNAL_I2C_BUSES 1
+undef HAL_MOUNT_ENABLED
+define HAL_MOUNT_ENABLED 1
+define HAL_MOUNT_SERVO_ENABLED 1
+undef AP_RTC_LOGGING_ENABLED
+define AP_RTC_LOGGING_ENABLED 1
+undef AP_SCHEDULER_EXTENDED_TASKINFO_ENABLED
+define AP_SCHEDULER_EXTENDED_TASKINFO_ENABLED 1
+undef AP_RC_CHANNEL_AUX_FUNCTION_STRINGS_ENABLED
+define AP_RC_CHANNEL_AUX_FUNCTION_STRINGS_ENABLED 1
+undef AP_MAVLINK_MSG_RELAY_STATUS_ENABLED
+define AP_MAVLINK_MSG_RELAY_STATUS_ENABLED 1
