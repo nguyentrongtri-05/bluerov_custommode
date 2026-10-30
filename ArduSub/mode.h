@@ -372,8 +372,12 @@ protected:
 protected:
 
     virtual void control_horizontal();
+    void update_pilot_xy_leash_and_release(const Vector2f &pilot_body_rates_cms);
     void apply_pier_limits_and_slew(float &forward_out, float &lateral_out, bool pos_ctrl_active);
-    bool _pilot_moving_xy = false;
+    bool _pilot_moving_fwd = false;
+    bool _pilot_moving_lat = false;
+    int8_t _last_fwd_dir = 0;
+    int8_t _last_lat_dir = 0;
     float _last_fwd_out = 0.0f;
     float _last_lat_out = 0.0f;
 };

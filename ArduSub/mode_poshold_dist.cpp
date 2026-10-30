@@ -150,9 +150,7 @@ void ModePosholdDist::control_horizontal()
         sub.get_pilot_desired_horizontal_rate(channel_forward),
         sub.get_pilot_desired_horizontal_rate(channel_lateral)
     };
-    if (sub.pier_limit_enabled) {
-        body_rates_cms *= constrain_float(g.phds_spd_scl.get(), 0.1f, 1.0f);
-    }
+    const Vector2f raw_pilot_rates_cms = body_rates_cms;
 
     // --- Tránh vật cản ---
     
@@ -207,7 +205,8 @@ void ModePosholdDist::control_horizontal()
     }
 
     if (_contact) {
-        _pilot_moving_xy = false;
+        _pilot_moving_fwd = false;
+        _pilot_moving_lat = false;
         // Đang tì vào bề mặt: KHÔNG gọi position controller để nó chuyển sang inactive,
         // bỏ lực tích lũy (khâu I). Khi thoát, nhánh bên dưới sẽ khởi tạo lại từ đầu.
         // Chỉ đẩy tới một lực nhỏ cố định, trục ngang điều khiển tay.
@@ -223,19 +222,9 @@ void ModePosholdDist::control_horizontal()
         auto earth_rates_cms = ahrs.body_to_earth2D(body_rates_cms);
         position_control->input_vel_accel_NE_cm(earth_rates_cms, {0, 0});
 
-        const bool pilot_moving = !body_rates_cms.is_zero();
-        if (pilot_moving) {
-            // Khi đang đẩy cần (hoặc tự lùi): giữ điểm đặt vị trí trùng với vị trí thực tế
-            // để điểm đặt không bao giờ chạy xuyên vào bên trong trụ cầu
-            position_control->NE_stop_pos_stabilisation();
-        } else if (_pilot_moving_xy) {
-            // Ngay khoảnh khắc vừa nhả cần về 0: chốt điểm giữ vị trí tại chỗ và xóa vận tốc đặt
-            // giúp ROV dừng đẩy tức thì và giữ nguyên vị trí hiện tại chống dòng nước
-            position_control->NE_stop_pos_stabilisation();
-            position_control->set_vel_desired_NE_ms({0.0f, 0.0f});
-            position_control->set_accel_desired_NE_mss({0.0f, 0.0f});
-        }
-        _pilot_moving_xy = pilot_moving;
+        // Xử lý dây cương (leash) và khóa vị trí tức thì khi nhả cần độc lập từng trục Tiến / Ngang
+        // Dùng raw_pilot_rates_cms (trước khi Ping can thiệp auto-reverse) để tự lùi không làm mất giữ vị trí
+        update_pilot_xy_leash_and_release(raw_pilot_rates_cms);
 
         // convert pos control roll and pitch angles back to lateral and forward efforts
         sub.translate_pos_control_rp(lateral_out, forward_out);
@@ -243,14 +232,12 @@ void ModePosholdDist::control_horizontal()
         // update the xy controller
         position_control->NE_update_controller();
     } else if (g.pilot_speed > 0) {
-        _pilot_moving_xy = false;
+        _pilot_moving_fwd = false;
+        _pilot_moving_lat = false;
         // allow the pilot to reposition manually
         forward_out = body_rates_cms.x / (float)g.pilot_speed;
         lateral_out = body_rates_cms.y / (float)g.pilot_speed;
     }
-
-    // --- Giới hạn bất đối xứng khi bật Pier Mode (k_custom_1) & Khởi động mềm / Dừng mềm ---
-    apply_pier_limits_and_slew(forward_out, lateral_out, sub.position_ok() && !_contact);
 
     // --- Áp sát: phát hiện bị bề mặt chặn lại ---
     // Phi công đẩy tới rõ ràng + bộ điều khiển đang ra lực tới + vận tốc tới (DVL qua EKF3) gần 0

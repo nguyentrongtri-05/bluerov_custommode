@@ -31,7 +31,10 @@ bool ModePoshold::init(bool ignore_checks)
     position_control->D_relax_controller(0.5f);
 
     sub.last_pilot_heading_rad = ahrs.get_yaw_rad();
-    _pilot_moving_xy = false;
+    _pilot_moving_fwd = false;
+    _pilot_moving_lat = false;
+    _last_fwd_dir = 0;
+    _last_lat_dir = 0;
     _last_fwd_out = 0.0f;
     _last_lat_out = 0.0f;
 
@@ -102,29 +105,65 @@ void ModePoshold::run()
 
 void ModePoshold::apply_pier_limits_and_slew(float &forward_out, float &lateral_out, bool pos_ctrl_active)
 {
-    // 1. Giới hạn bất đối xứng khi bật nút Custom 1 (Pier Mode):
-    //    - Chiều Tiến vào trụ (forward_out > 0): khóa tối đa theo PHDS_FWD_MAX (mặc định 30%)
-    //    - Chiều Ngang chống dòng chảy (lateral_out) & Chiều Lùi (forward_out < 0): giới hạn theo PHDS_LAT_MAX (mặc định 85%)
-    if (sub.pier_limit_enabled) {
-        const float fwd_max = constrain_float(g.phds_fwd_max.get(), 0.10f, 1.0f);
-        const float lat_max = constrain_float(g.phds_lat_max.get(), 0.20f, 1.0f);
-        const bool limited = (forward_out > fwd_max) || (forward_out < -lat_max) || (fabsf(lateral_out) > lat_max);
-        forward_out = constrain_float(forward_out, -lat_max, fwd_max);
-        lateral_out = constrain_float(lateral_out, -lat_max, lat_max);
-        if (limited && pos_ctrl_active) {
-            position_control->NE_set_externally_limited();
-        }
+    (void)forward_out;
+    (void)lateral_out;
+    (void)pos_ctrl_active;
+}
+
+void ModePoshold::update_pilot_xy_leash_and_release(const Vector2f &pilot_body_rates_cms)
+{
+    const bool pilot_fwd_moving = !is_zero(pilot_body_rates_cms.x);
+    const bool pilot_lat_moving = !is_zero(pilot_body_rates_cms.y);
+    const bool fwd_released = (!pilot_fwd_moving && _pilot_moving_fwd);
+    const bool lat_released = (!pilot_lat_moving && _pilot_moving_lat);
+
+    if (pilot_fwd_moving) {
+        _last_fwd_dir = is_positive(pilot_body_rates_cms.x) ? 1 : -1;
+    }
+    if (pilot_lat_moving) {
+        _last_lat_dir = is_positive(pilot_body_rates_cms.y) ? 1 : -1;
     }
 
-    // 2. Khởi động mềm & Dừng mềm (Thrust Slew-Rate Limiter) bảo vệ động cơ:
-    const float slew_rate = g.phds_slew_rate.get();
-    if (slew_rate > 0.0f && G_Dt > 0.0f) {
-        const float max_delta = slew_rate * G_Dt;
-        forward_out = constrain_float(forward_out, _last_fwd_out - max_delta, _last_fwd_out + max_delta);
-        lateral_out = constrain_float(lateral_out, _last_lat_out - max_delta, _last_lat_out + max_delta);
+    // Khi vừa nhả cần (fwd_released hoặc lat_released):
+    // 1. Đưa vận tốc đặt (vel_desired) của trục vừa nhả về 0 tức thì để điểm đặt DP dừng tiến ngay
+    //    (triệt tiêu hoàn toàn độ trễ giảm tốc 1-2s của bộ tạo quỹ đạo shape_vel_accel_xy).
+    // 2. Giữ nguyên độ lệch vị trí (pos_lead = DP - P) trong phạm vi dây cương giữ vị trí (0.25m)
+    //    để bảo toàn 100% lực P chống dòng chảy / lực kéo dây cáp như code gốc; chỉ kẹp phần
+    //    pos_lead bị tích lũy dư vượt quá 0.25m theo đúng chiều vừa đẩy cần.
+    if (fwd_released || lat_released) {
+        static constexpr float RELEASE_HOLD_LEASH_M = 0.25f;
+        const Vector2p pos_est_ne_m = position_control->get_pos_estimate_NED_m().xy();
+        const Vector2f pos_lead_ne_m = (position_control->get_pos_desired_NED_m().xy() - pos_est_ne_m).tofloat();
+        Vector2f pos_lead_body_m = ahrs.earth_to_body2D(pos_lead_ne_m);
+        Vector2f vel_des_body_ms = ahrs.earth_to_body2D(position_control->get_vel_desired_NED_ms().xy());
+
+        if (fwd_released) {
+            vel_des_body_ms.x = 0.0f;
+            if (_last_fwd_dir > 0 && pos_lead_body_m.x > RELEASE_HOLD_LEASH_M) {
+                pos_lead_body_m.x = RELEASE_HOLD_LEASH_M;
+            } else if (_last_fwd_dir < 0 && pos_lead_body_m.x < -RELEASE_HOLD_LEASH_M) {
+                pos_lead_body_m.x = -RELEASE_HOLD_LEASH_M;
+            }
+            _last_fwd_dir = 0;
+        }
+        if (lat_released) {
+            vel_des_body_ms.y = 0.0f;
+            if (_last_lat_dir > 0 && pos_lead_body_m.y > RELEASE_HOLD_LEASH_M) {
+                pos_lead_body_m.y = RELEASE_HOLD_LEASH_M;
+            } else if (_last_lat_dir < 0 && pos_lead_body_m.y < -RELEASE_HOLD_LEASH_M) {
+                pos_lead_body_m.y = -RELEASE_HOLD_LEASH_M;
+            }
+            _last_lat_dir = 0;
+        }
+
+        const Vector2f new_lead_ne_m = ahrs.body_to_earth2D(pos_lead_body_m);
+        position_control->set_pos_desired_NE_m(pos_est_ne_m + new_lead_ne_m.topostype());
+        position_control->set_vel_desired_NE_ms(ahrs.body_to_earth2D(vel_des_body_ms));
+        position_control->set_accel_desired_NE_mss({0.0f, 0.0f});
     }
-    _last_fwd_out = forward_out;
-    _last_lat_out = lateral_out;
+
+    _pilot_moving_fwd = pilot_fwd_moving;
+    _pilot_moving_lat = pilot_lat_moving;
 }
 
 void ModePoshold::control_horizontal() {
@@ -136,9 +175,6 @@ void ModePoshold::control_horizontal() {
         sub.get_pilot_desired_horizontal_rate(channel_forward),
         sub.get_pilot_desired_horizontal_rate(channel_lateral)
     };
-    if (sub.pier_limit_enabled) {
-        body_rates_cms *= constrain_float(g.phds_spd_scl.get(), 0.1f, 1.0f);
-    }
 
     if (sub.position_ok()) {
         if (!position_control->NE_is_active()) {
@@ -150,18 +186,8 @@ void ModePoshold::control_horizontal() {
         auto earth_rates_cms = ahrs.body_to_earth2D(body_rates_cms);
         position_control->input_vel_accel_NE_cm(earth_rates_cms, {0, 0});
 
-        const bool pilot_moving = !body_rates_cms.is_zero();
-        if (pilot_moving) {
-            // Khi đang đẩy cần: giữ điểm đặt vị trí trùng với vị trí thực tế hiện tại
-            // để điểm đặt không chạy vượt lên trước xuyên vào trụ cầu
-            position_control->NE_stop_pos_stabilisation();
-        } else if (_pilot_moving_xy) {
-            // Ngay khoảnh khắc vừa nhả cần về 0: chốt điểm giữ vị trí tại chỗ và xóa vận tốc đặt
-            position_control->NE_stop_pos_stabilisation();
-            position_control->set_vel_desired_NE_ms({0.0f, 0.0f});
-            position_control->set_accel_desired_NE_mss({0.0f, 0.0f});
-        }
-        _pilot_moving_xy = pilot_moving;
+        // Chốt vị trí tức thì khi nhả cần độc lập từng trục Tiến / Ngang (không giảm lực trục nào)
+        update_pilot_xy_leash_and_release(body_rates_cms);
 
         // convert pos control roll and pitch angles back to lateral and forward efforts
         sub.translate_pos_control_rp(lateral_out, forward_out);
@@ -169,13 +195,12 @@ void ModePoshold::control_horizontal() {
         // update the xy controller
         position_control->NE_update_controller();
     } else if (g.pilot_speed > 0) {
-        _pilot_moving_xy = false;
+        _pilot_moving_fwd = false;
+        _pilot_moving_lat = false;
         // allow the pilot to reposition manually
         forward_out = body_rates_cms.x / (float)g.pilot_speed;
         lateral_out = body_rates_cms.y / (float)g.pilot_speed;
     }
-
-    apply_pier_limits_and_slew(forward_out, lateral_out, sub.position_ok());
 
     motors.set_forward(forward_out);
     motors.set_lateral(lateral_out);

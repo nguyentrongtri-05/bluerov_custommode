@@ -115,9 +115,6 @@ void ModeAlthold::control_depth() {
 
     float target_climb_rate_cms = sub.get_pilot_desired_climb_rate(channel_throttle->get_control_in());
     target_climb_rate_cms = constrain_float(target_climb_rate_cms, -sub.get_pilot_speed_dn(), g.pilot_speed_up);
-    if (sub.pier_limit_enabled) {
-        target_climb_rate_cms *= constrain_float(g.phds_spd_scl.get(), 0.1f, 1.0f);
-    }
 
     const bool pilot_moving_z = (fabsf(target_climb_rate_cms) >= 0.05f);
 
@@ -133,11 +130,7 @@ void ModeAlthold::control_depth() {
 
     position_control->D_set_pos_target_from_climb_rate_cms(target_climb_rate_cms);
 
-    if (pilot_moving_z) {
-        // Khi đang đẩy cần lên/xuống: giữ điểm đặt độ sâu bám sát độ sâu thực tế
-        // tránh điểm đặt chạy vọt lố xuống đáy bùn hoặc vướng gầm trụ cầu
-        position_control->set_pos_desired_U_cm(position_control->get_pos_estimate_U_m() * 100.0f);
-    } else if (_pilot_moving_z) {
+    if (!pilot_moving_z && _pilot_moving_z) {
         // Ngay khoảnh khắc vừa nhả cần độ sâu về giữa: chốt độ sâu tại chỗ và xóa vận tốc đặt
         position_control->set_pos_desired_U_cm(position_control->get_pos_estimate_U_m() * 100.0f);
         position_control->set_vel_desired_D_ms(0.0f);
